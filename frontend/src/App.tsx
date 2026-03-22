@@ -1,287 +1,250 @@
-import {useEffect, useMemo, useState} from 'react';
-import {Activity, FolderGit2, GitCommitHorizontal, RefreshCw} from 'lucide-react';
-import {Badge} from '@/components/ui/badge';
-import {Button} from '@/components/ui/button';
-import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
-import {GetDashboardSnapshot} from '../wailsjs/go/app/App';
- 
-type WeeklyCommit = {
-    week: string;
-    commits: number;
-};
+import {useEffect, useMemo, useState} from 'react'
+import {GetDashboardSnapshot} from '../wailsjs/go/app/App'
+import type {gitstats} from '../wailsjs/go/models'
+import {GitCommitHorizontal, History} from 'lucide-react'
 
-type RecentCommit = {
-    repo: string;
-    author: string;
-    message: string;
-    date: string;
-};
+type LoadState = 'idle' | 'loading' | 'ready' | 'error'
 
-type DashboardMetrics = {
-    totalCommits: number;
-    activeRepos: number;
-    avgPerWeek: number;
-};
+const monthLabels = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
 
-type DashboardSnapshot = {
-    metrics: DashboardMetrics;
-    weeklyCommits: WeeklyCommit[];
-    recentCommits: RecentCommit[];
-    windowDays: number;
-};
+function formatRelativeDate(isoDate: string): string {
+    const now = Date.now()
+    const timestamp = new Date(isoDate).getTime()
+    const diffMs = Math.max(now - timestamp, 0)
+    const diffMinutes = Math.floor(diffMs / 60000)
 
-const EMPTY_METRICS: DashboardMetrics = {
-    totalCommits: 0,
-    activeRepos: 0,
-    avgPerWeek: 0
-};
-
-const EMPTY_WEEKLY_COMMITS: WeeklyCommit[] = [
-    {week: 'Sem 1', commits: 0},
-    {week: 'Sem 2', commits: 0},
-    {week: 'Sem 3', commits: 0},
-    {week: 'Sem 4', commits: 0},
-    {week: 'Sem 5', commits: 0},
-    {week: 'Sem 6', commits: 0}
-];
-
-function asErrorMessage(value: unknown): string {
-    if (value instanceof Error && value.message) {
-        return value.message;
+    if (diffMinutes < 1) {
+        return 'agora'
+    }
+    if (diffMinutes < 60) {
+        return `${diffMinutes}m atrás`
     }
 
-    if (typeof value === 'string' && value.length > 0) {
-        return value;
+    const diffHours = Math.floor(diffMinutes / 60)
+    if (diffHours < 24) {
+        return `${diffHours}h atrás`
     }
 
-    return 'Não foi possível carregar as estatísticas agora. Tente novamente.';
+    const diffDays = Math.floor(diffHours / 24)
+    return `${diffDays}d atrás`
 }
 
-function formatCommitDate(value: string): string {
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) {
-        return value;
+function buildGraphPath(points: number[]): string {
+    if (points.length === 0) {
+        return ''
     }
 
-    return new Intl.DateTimeFormat('pt-BR', {
-        dateStyle: 'short',
-        timeStyle: 'short'
-    }).format(parsed);
+    const maxValue = Math.max(...points, 1)
+    const step = 100 / Math.max(points.length - 1, 1)
+
+    return points
+        .map((value, index) => {
+            const x = index * step
+            const y = 90 - (value / maxValue) * 70
+            return `${index === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`
+        })
+        .join(' ')
+}
+
+function buildAreaPath(points: number[]): string {
+    if (points.length === 0) {
+        return ''
+    }
+
+    const linePath = buildGraphPath(points)
+    return `${linePath} L100,100 L0,100 Z`
 }
 
 function App() {
-    const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
-    const [error, setError] = useState<string | null>(null);
-    const [isLoading, setIsLoading] = useState(true);
-    const [isRefreshing, setIsRefreshing] = useState(false);
-
-    const loadSnapshot = async (mode: 'initial' | 'refresh') => {
-        if (mode === 'refresh' && (isRefreshing || isLoading)) {
-            return;
-        }
-
-        if (mode === 'initial') {
-            setIsLoading(true);
-        } else {
-            setIsRefreshing(true);
-        }
-
-        setError(null);
-
-        try {
-            const nextSnapshot = await GetDashboardSnapshot();
-            setSnapshot(nextSnapshot);
-        } catch (loadError) {
-            setError(asErrorMessage(loadError));
-            if (mode === 'initial') {
-                setSnapshot(null);
-            }
-        } finally {
-            if (mode === 'initial') {
-                setIsLoading(false);
-            } else {
-                setIsRefreshing(false);
-            }
-        }
-    };
+    const [state, setState] = useState<LoadState>('idle')
+    const [error, setError] = useState('')
+    const [snapshot, setSnapshot] = useState<gitstats.DashboardSnapshot | null>(null)
 
     useEffect(() => {
-        void loadSnapshot('initial');
-    }, []);
+        let mounted = true
 
-    const weeklyCommits = snapshot?.weeklyCommits?.length ? snapshot.weeklyCommits : EMPTY_WEEKLY_COMMITS;
-    const metrics = snapshot?.metrics ?? EMPTY_METRICS;
-    const recentCommits = snapshot?.recentCommits ?? [];
-    const windowDays = snapshot?.windowDays ?? 182;
-    const isEmpty = !isLoading && !error && metrics.totalCommits === 0;
+        const load = async () => {
+            setState('loading')
+            setError('')
 
-    const maxCommits = useMemo(
-        () => Math.max(...weeklyCommits.map((item) => item.commits), 1),
-        [weeklyCommits]
-    );
+            try {
+                const data = await GetDashboardSnapshot()
+                if (!mounted) {
+                    return
+                }
+                setSnapshot(data)
+                setState('ready')
+            } catch (loadError) {
+                if (!mounted) {
+                    return
+                }
+                const message = loadError instanceof Error ? loadError.message : 'Erro ao carregar dados'
+                setError(message)
+                setState('error')
+            }
+        }
+
+        void load()
+
+        return () => {
+            mounted = false
+        }
+    }, [])
+
+    const weeklyValues = useMemo(() => {
+        if (!snapshot?.weeklyCommits?.length) {
+            return [0, 0, 0, 0, 0, 0, 0, 0]
+        }
+        return snapshot.weeklyCommits.map((item) => item.commits)
+    }, [snapshot])
+
+    const graphPath = useMemo(() => buildGraphPath(weeklyValues), [weeklyValues])
+    const areaPath = useMemo(() => buildAreaPath(weeklyValues), [weeklyValues])
+
+    const heatmap = useMemo(() => {
+        if (!snapshot?.weeklyCommits?.length) {
+            return Array.from({length: 52 * 7}, () => 0)
+        }
+
+        const maxWeekCommits = Math.max(...snapshot.weeklyCommits.map((item) => item.commits), 1)
+
+        return Array.from({length: 52 * 7}, (_, index) => {
+            const weekIndex = Math.floor(index / 7)
+            const mappedWeek = Math.floor((weekIndex / 52) * snapshot.weeklyCommits.length)
+            const value = snapshot.weeklyCommits[mappedWeek]?.commits ?? 0
+            return Math.min(Math.floor((value / maxWeekCommits) * 4), 4)
+        })
+    }, [snapshot])
+
+    const totalCommits = snapshot?.metrics.totalCommits ?? 0
+    const avgPerWeek = snapshot?.metrics.avgPerWeek ?? 0
 
     return (
-        <main className="mx-auto grid max-w-7xl gap-4 px-3 py-3 md:px-4 md:py-4">
-            <section className="grid gap-3 rounded-3xl bg-surface-variant/40 p-3 shadow-ambient backdrop-blur-xl md:p-3.5 lg:grid-cols-[1.1fr_0.9fr]">
-                <div className="space-y-2.5 text-left">
-                    <header className='flex items-center justify-between'>
-                        <Badge variant="green" className="w-fit">Visão Editorial</Badge>
-
-                        <Button
-                            variant="secondary"
-                            size="sm"
-                            aria-label="Atualizar snapshot"
-                            title="Atualizar snapshot"
-                            className="h-7 w-7 rounded-full p-0 opacity-80 transition-all duration-200 hover:scale-105 hover:opacity-100"
-                            onClick={() => void loadSnapshot('refresh')}
-                            disabled={isLoading || isRefreshing}
-                        >
-                            <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`}/>
-                        </Button>
-                    </header>
-                    <h1 className="text-2xl font-extrabold tracking-[-0.02em] text-foreground md:text-3xl">
-                        Estatísticas de commits locais
-                    </h1>
-                    <p className="max-w-xl text-xs text-muted-foreground md:text-sm">
-                        Um panorama dos seus últimos commits com foco em ritmo, impacto e consistência entre repositórios.
-                    </p>
-                    <Badge className="bg-secondary text-secondary-foreground">últimos 6 meses ({windowDays} dias)</Badge>
-                </div>
-
-                <Card className="relative bg-gradient-to-br from-[#7bdb80] to-[#238636] text-[#08120b] transition-all duration-200 hover:-translate-y-0.5">
-                    <CardHeader className="p-3.5 pb-1.5">
-                        <CardTitle className="text-xs uppercase tracking-[0.05em] text-[#122718]/80">Impacto total</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-1 p-3.5 pt-0">
-                        <p className="text-4xl font-extrabold tracking-[-0.02em]">{isLoading ? '…' : metrics.totalCommits}</p>
-                        <p className="text-xs font-medium text-[#122718]/85">
-                            {error ? 'falha ao carregar o período' : 'commits no período selecionado'}
-                        </p>
-                    </CardContent>
-                </Card>
-            </section>
-
-            <section className="grid gap-2.5 md:grid-cols-3" aria-label="Estatísticas gerais">
-                <Card className="transition-all duration-200 hover:-translate-y-0.5">
-                    <CardHeader className="p-3 pb-1.5">
-                        <CardTitle className="flex items-center gap-2 text-xs uppercase tracking-[0.05em] text-muted-foreground">
-                            <GitCommitHorizontal className="h-4 w-4 text-primary"/> Total de commits
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-3 pt-0">
-                        <p className="text-2xl font-extrabold tracking-[-0.02em]">{isLoading ? '…' : metrics.totalCommits}</p>
-                    </CardContent>
-                </Card>
-
-                <Card className="bg-surface-low transition-all duration-200 hover:-translate-y-0.5">
-                    <CardHeader className="p-3 pb-1.5">
-                        <CardTitle className="flex items-center gap-2 text-xs uppercase tracking-[0.05em] text-muted-foreground">
-                            <FolderGit2 className="h-4 w-4 text-primary"/> Repositórios ativos
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-3 pt-0">
-                        <p className="text-2xl font-extrabold tracking-[-0.02em]">{isLoading ? '…' : metrics.activeRepos}</p>
-                    </CardContent>
-                </Card>
-
-                <Card className="bg-surface-highest transition-all duration-200 hover:-translate-y-0.5">
-                    <CardHeader className="p-3 pb-1.5">
-                        <CardTitle className="flex items-center gap-2 text-xs uppercase tracking-[0.05em] text-muted-foreground">
-                            <Activity className="h-4 w-4 text-primary"/> Média semanal
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-3 pt-0">
-                        <p className="text-2xl font-extrabold tracking-[-0.02em]">{isLoading ? '…' : metrics.avgPerWeek}</p>
-                    </CardContent>
-                </Card>
-            </section>
-
-
-            <section className="grid gap-3 lg:grid-cols-[0.9fr_1.1fr]">
-                <Card className="bg-surface-high transition-all duration-200 hover:-translate-y-0.5">
-                    <CardHeader className="p-3 pb-1.5">
-                        <CardTitle className="text-base">Commits por semana</CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-3 pt-0">
-                        <div className="overflow-x-auto pb-1" role="img" aria-label="Gráfico de barras com commits semanais">
-                            <div className="flex h-[220px] min-w-max items-end gap-1.5">
-                                {weeklyCommits.map((item) => {
-                                const barHeight = `${(item.commits / maxCommits) * 100}%`;
-                                const intensityClass = item.commits > 25
-                                    ? 'from-[#7bdb80] to-[#56c05f]'
-                                    : item.commits > 18
-                                        ? 'from-[#5aaa60] to-[#3e8f46]'
-                                        : 'from-[#238636] to-[#1f6e32]';
-
-                                    return (
-                                        <div key={item.week} className="grid h-full w-8 grid-rows-[1fr_auto_auto] items-end gap-1.5">
-                                            <div className="h-full rounded-md bg-surface-highest p-1">
-                                                <div
-                                                    className={`w-full rounded-md bg-gradient-to-t ${intensityClass} transition-all duration-300 hover:scale-y-105`}
-                                                    style={{height: barHeight}}
-                                                    title={`${item.commits} commits`}
-                                                />
-                                            </div>
-                                            <span className="text-center text-[0.7rem] text-foreground">{item.commits}</span>
-                                            <span className="text-center text-[0.62rem] uppercase tracking-[0.05em] text-muted-foreground">{item.week}</span>
-                                        </div>
-                                    );
-                                })}
-                            </div>
+        <div className="min-h-screen bg-surface text-foreground pb-24">
+            <main className="mx-auto max-w-2xl space-y-8 px-4 pt-6">
+                <section className="space-y-4">
+                    <div className="flex items-end justify-between">
+                        <div>
+                            <span className="text-[0.7rem] font-bold uppercase tracking-widest text-muted-foreground">Insights</span>
+                            <h2 className="text-2xl font-bold tracking-tight text-foreground">Commit Activity</h2>
                         </div>
-                        {error ? (
-                            <p className="mt-2.5 text-xs text-muted-foreground">{error}</p>
-                        ) : null}
-                        {isEmpty ? (
-                            <p className="mt-2.5 text-xs text-muted-foreground">Sem commits no período selecionado.</p>
-                        ) : null}
-                    </CardContent>
-                </Card>
+                        <div className="text-right">
+                            <span className="text-lg font-bold text-primary">{avgPerWeek}/sem</span>
+                            <p className="text-[0.65rem] uppercase tracking-wider text-muted-foreground">média de commits</p>
+                        </div>
+                    </div>
 
-                <Card className="bg-surface-low transition-all duration-200 hover:-translate-y-0.5">
-                    <CardHeader className="p-3 pb-1.5">
-                        <CardTitle className="text-base">Últimos 20 commits</CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-3 pt-0">
-                        {error ? (
-                            <div className="space-y-3">
-                                <p className="text-xs text-muted-foreground">{error}</p>
-                                <Button variant="secondary" size="sm" onClick={() => void loadSnapshot('initial')}>
-                                    Tentar novamente
-                                </Button>
-                            </div>
-                        ) : null}
+                    <div className="relative h-64 overflow-hidden rounded-xl bg-surface-low p-6">
+                        <div className="absolute inset-0 flex flex-col justify-between p-6 opacity-10">
+                            <div className="border-b border-foreground"/>
+                            <div className="border-b border-foreground"/>
+                            <div className="border-b border-foreground"/>
+                            <div className="border-b border-foreground"/>
+                        </div>
 
-                        {!error && recentCommits.length === 0 ? (
-                            <p className="text-xs text-muted-foreground">
-                                {isLoading ? 'Carregando commits recentes...' : 'Nenhum commit recente encontrado.'}
-                            </p>
-                        ) : null}
+                        <svg className="absolute inset-0 h-full w-full px-6 pb-6 pt-10" preserveAspectRatio="none" viewBox="0 0 100 100">
+                            <defs>
+                                <linearGradient id="commitFill" x1="0" x2="0" y1="0" y2="1">
+                                    <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity="0.45"/>
+                                    <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity="0"/>
+                                </linearGradient>
+                            </defs>
+                            <path d={areaPath} fill="url(#commitFill)"/>
+                            <path d={graphPath} fill="none" stroke="hsl(var(--primary))" strokeLinecap="round" strokeWidth="2"/>
+                        </svg>
 
-                        {!error && recentCommits.length > 0 ? (
-                            <ul className="max-h-[520px] space-y-2 overflow-y-auto pr-1">
-                                {recentCommits.map((commit) => (
-                                <li
-                                    key={`${commit.repo}-${commit.date}-${commit.message}`}
-                                    className="rounded-md bg-surface-high p-2 transition-all duration-200 hover:-translate-y-0.5 hover:bg-surface-bright"
-                                >
-                                    <div className="flex items-start justify-between gap-2">
-                                        <div className="min-w-0">
-                                            <p className="text-[0.68rem] font-bold uppercase tracking-[0.08em] text-foreground">{commit.repo}</p>
-                                            <p className="mt-1 text-xs font-semibold text-foreground">{commit.message}</p>
-                                            <p className="mt-1 text-[0.66rem] uppercase tracking-[0.05em] text-muted-foreground">{commit.author}</p>
-                                        </div>
-                                        <time className="shrink-0 text-[0.66rem] font-semibold text-muted-foreground">{formatCommitDate(commit.date)}</time>
+                        <div className="absolute bottom-4 left-6 right-6 flex justify-between text-[0.6rem] font-bold uppercase tracking-widest text-muted-foreground">
+                            <span>{snapshot?.windowDays ?? 0} dias atrás</span>
+                            <span>Hoje</span>
+                        </div>
+                    </div>
+                </section>
+
+                <section className="overflow-hidden rounded-xl border border-white/5 bg-surface-low p-4 sm:p-6">
+                    <div className="mb-4 flex items-center justify-between gap-2">
+                        <h3 className="text-sm font-bold text-foreground">Contribuições no período</h3>
+                        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                            <span>Menos</span>
+                            <div className="h-2.5 w-2.5 rounded-sm bg-surface-highest"/>
+                            <div className="h-2.5 w-2.5 rounded-sm bg-primary/30"/>
+                            <div className="h-2.5 w-2.5 rounded-sm bg-primary/60"/>
+                            <div className="h-2.5 w-2.5 rounded-sm bg-primary/80"/>
+                            <div className="h-2.5 w-2.5 rounded-sm bg-primary"/>
+                            <span>Mais</span>
+                        </div>
+                    </div>
+
+                    <div className="hide-scrollbar overflow-x-auto">
+                        <div className="inline-grid min-w-full grid-flow-col grid-rows-7 gap-1.5">
+                            {heatmap.map((level, index) => {
+                                const levelClass =
+                                    level <= 0
+                                        ? 'bg-surface-highest'
+                                        : level === 1
+                                            ? 'bg-primary/20'
+                                            : level === 2
+                                                ? 'bg-primary/40'
+                                                : level === 3
+                                                    ? 'bg-primary/70'
+                                                    : 'bg-primary'
+
+                                return <div key={index} className={`h-2.5 w-2.5 rounded-[2px] ${levelClass}`}/>
+                            })}
+                        </div>
+                    </div>
+
+                    <div className="mt-4 flex items-center justify-between gap-4">
+                        <div className="text-[10px] text-muted-foreground">
+                            <span className="font-bold text-foreground">Total: {totalCommits}</span> commits
+                        </div>
+                        <div className="flex flex-wrap justify-end gap-2 text-[9px] font-bold uppercase text-muted-foreground">
+                            {monthLabels.map((month) => (
+                                <span key={month}>{month}</span>
+                            ))}
+                        </div>
+                    </div>
+                </section>
+
+                <section className="space-y-4">
+                    <div className="flex items-center justify-between">
+                        <h3 className="text-lg font-bold tracking-tight text-foreground">Recent Activity</h3>
+                        <button className="text-[0.7rem] font-bold uppercase tracking-widest text-primary" type="button">
+                            View History
+                        </button>
+                    </div>
+
+                    <div className="space-y-2">
+                        {state === 'loading' && (
+                            <div className="rounded-xl bg-surface-low p-4 text-sm text-muted-foreground">Carregando atividade…</div>
+                        )}
+
+                        {state === 'error' && (
+                            <div className="rounded-xl bg-surface-low p-4 text-sm text-red-300">{error}</div>
+                        )}
+
+                        {state === 'ready' && snapshot?.recentCommits.length === 0 && (
+                            <div className="rounded-xl bg-surface-low p-4 text-sm text-muted-foreground">Nenhum commit recente encontrado.</div>
+                        )}
+
+                        {snapshot?.recentCommits.map((commit, index) => (
+                            <div key={`${commit.repo}-${commit.date}-${index}`} className="flex items-start gap-4 rounded-xl p-4 transition-colors hover:bg-surface-high">
+                                <div className="mt-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-surface-highest text-muted-foreground">
+                                    {index === 0 ? <GitCommitHorizontal size={16} className="text-primary"/> : <History size={16}/>} 
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                    <div className="flex items-baseline justify-between gap-2">
+                                        <h4 className="truncate text-sm font-bold text-foreground">{commit.repo}</h4>
+                                        <span className="flex-shrink-0 text-[0.65rem] text-muted-foreground">{formatRelativeDate(commit.date)}</span>
                                     </div>
-                                </li>
-                                ))}
-                            </ul>
-                        ) : null}
-                    </CardContent>
-                </Card>
-            </section>
-        </main>
-    );
+                                    <p className="mt-1 truncate text-xs italic text-muted-foreground">“{commit.message}”</p>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </section>
+            </main>
+        </div>
+    )
 }
 
-export {App};
+export {App}
