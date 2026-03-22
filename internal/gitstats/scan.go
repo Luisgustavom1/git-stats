@@ -46,11 +46,11 @@ func Scan(folder string) {
 }
 
 func getDotFilePath() string {
-	_, err := user.Current()
+	user, err := user.Current()
 	if err != nil {
 		log.Fatal(err)
 	}
-	dotFile := ".gitstats"
+	dotFile := user.HomeDir + "/.gitstats"
 	return dotFile
 }
 
