@@ -1,7 +1,8 @@
-import {useEffect, useMemo, useState} from 'react'
+import {useEffect, useState} from 'react'
 import {GetDashboardSnapshot} from '../wailsjs/go/app/App'
 import type {gitstats} from '../wailsjs/go/models'
 import {GitCommitHorizontal, History} from 'lucide-react'
+import {Tooltip, TooltipContent, TooltipProvider, TooltipTrigger} from '@/components/ui/tooltip'
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
 
@@ -30,6 +31,18 @@ function formatRelativeDate(isoDate: string): string {
 
     const diffDays = Math.floor(diffHours / 24)
     return `${diffDays}d atrás`
+}
+
+function formatContributionDate(dateValue: string): string {
+    const parsed = new Date(dateValue)
+    if (Number.isNaN(parsed.getTime())) {
+        return dateValue
+    }
+    return new Intl.DateTimeFormat('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+    }).format(parsed)
 }
 
 function buildGraphPath(points: number[]): string {
@@ -110,49 +123,39 @@ function App() {
         }
     }, [])
 
-    const dailyValues = useMemo(() => {
-        const fallbackDays = snapshot?.windowDays ?? 182
-        if (!snapshot?.dailyCommits?.length) {
-            return Array.from({length: fallbackDays}, () => 0)
-        }
-        return snapshot.dailyCommits.map((item) => item.commits)
-    }, [snapshot])
+    const fallbackDays = snapshot?.windowDays ?? 182
+    const dailyValues = snapshot?.dailyCommits?.length
+        ? snapshot.dailyCommits.map((item) => item.commits)
+        : Array.from({length: fallbackDays}, () => 0)
 
-    const weeklyValues = useMemo(() => aggregateDailyToWeekly(dailyValues), [dailyValues])
+    const weeklyValues = aggregateDailyToWeekly(dailyValues)
+    const areaPath = buildAreaPath(weeklyValues)
 
-    const areaPath = useMemo(() => buildAreaPath(weeklyValues), [weeklyValues])
+    const maxDayCommits = Math.max(...dailyValues, 1)
+    const heatmap = dailyValues.map((value) => Math.min(Math.ceil((value / maxDayCommits) * 4), 4))
 
-    const heatmap = useMemo(() => {
-        const maxDayCommits = Math.max(...dailyValues, 1)
-        return dailyValues.map((value) => Math.min(Math.floor((value / maxDayCommits) * 4), 4))
-    }, [dailyValues])
-
-    const heatmapMonthLabels = useMemo(() => {
-        const months = 6
-        const now = new Date()
-
-        return Array.from({length: months}, (_, index) => {
-            const monthDate = new Date(now.getFullYear(), now.getMonth() - (months - 1 - index), 1)
-            return formatMonthLabel(monthDate)
+    const dailyDates = snapshot?.dailyCommits?.length
+        ? snapshot.dailyCommits.map((item) => item.date)
+        : Array.from({length: fallbackDays}, (_, index) => {
+            const today = new Date()
+            today.setDate(today.getDate() - (fallbackDays - 1 - index))
+            return today.toISOString().slice(0, 10)
         })
-    }, [])
 
-    const totalCommits = useMemo(
-        () => dailyValues.reduce((accumulator, value) => accumulator + value, 0),
-        [dailyValues]
-    )
-    const avgPerWeek = useMemo(() => {
-        const windowDays = snapshot?.windowDays ?? dailyValues.length
-        if (windowDays <= 0) {
-            return 0
-        }
-        return Math.round((totalCommits * 7) / windowDays)
-    }, [dailyValues.length, snapshot?.windowDays, totalCommits])
+    const now = new Date()
+    const heatmapMonthLabels = Array.from({length: 6}, (_, index) => {
+        const monthDate = new Date(now.getFullYear(), now.getMonth() - (5 - index), 1)
+        return formatMonthLabel(monthDate)
+    })
+
+    const totalCommits = dailyValues.reduce((accumulator, value) => accumulator + value, 0)
+    const windowDays = snapshot?.windowDays ?? dailyValues.length
+    const avgPerWeek = windowDays > 0 ? Math.round((totalCommits * 7) / windowDays) : 0
     const maxWeeklyCommits = Math.max(...weeklyValues, 0)
 
     return (
-        <div className="h-screen overflow-hidden bg-surface text-foreground">
-            <main className="mx-auto h-full w-full space-y-2 overflow-y-auto px-2 py-2">
+        <div className="overflow-hidden bg-surface text-foreground">
+            <main className="mx-auto h-full w-full space-y-2 overflow-y-auto px-2 py-2 max-w-xl">
                 <section className="space-y-1.5">
                     <div className="flex items-end justify-between">
                         <h2 className="text-sm font-bold tracking-tight text-foreground">Commit Activity</h2>
@@ -196,50 +199,69 @@ function App() {
                     </div>
                 </section>
 
-                <section className="overflow-hidden rounded-lg border border-white/5 bg-surface-low p-2">
-                    <div className="mb-2 flex items-center justify-between gap-1">
-                        <h3 className="text-[10px] font-bold text-foreground">Contribuições</h3>
-                        <div className="flex items-center gap-1 text-[8px] uppercase tracking-wider text-muted-foreground">
-                            <span>Menos</span>
-                            <div className="h-1.5 w-1.5 rounded-[2px] bg-surface-highest"/>
-                            <div className="h-1.5 w-1.5 rounded-[2px] bg-primary/30"/>
-                            <div className="h-1.5 w-1.5 rounded-[2px] bg-primary/60"/>
-                            <div className="h-1.5 w-1.5 rounded-[2px] bg-primary/80"/>
-                            <div className="h-1.5 w-1.5 rounded-[2px] bg-primary"/>
-                            <span>Mais</span>
+                <TooltipProvider delayDuration={80}>
+                    <section className="overflow-hidden rounded-lg border border-white/5 bg-surface-low p-2">
+                        <div className="mb-2 flex items-center justify-between gap-1">
+                            <h3 className="text-[10px] font-bold text-foreground">Contribuições</h3>
+                            <div className="flex items-center gap-1 text-[8px] uppercase tracking-wider text-muted-foreground">
+                                <span>Menos</span>
+                                <div className="h-1.5 w-1.5 rounded-[2px] bg-surface-highest"/>
+                                <div className="h-1.5 w-1.5 rounded-[2px] bg-primary/30"/>
+                                <div className="h-1.5 w-1.5 rounded-[2px] bg-primary/60"/>
+                                <div className="h-1.5 w-1.5 rounded-[2px] bg-primary/80"/>
+                                <div className="h-1.5 w-1.5 rounded-[2px] bg-primary"/>
+                                <span>Mais</span>
+                            </div>
                         </div>
-                    </div>
 
-                    <div className="hide-scrollbar overflow-x-auto">
-                        <div className="inline-grid min-w-full grid-flow-col grid-rows-7 gap-1">
-                            {heatmap.map((level, index) => {
-                                const levelClass =
-                                    level <= 0
-                                        ? 'bg-surface-highest'
-                                        : level === 1
-                                            ? 'bg-primary/20'
-                                            : level === 2
+                        <div className="hide-scrollbar overflow-x-auto">
+                            <div className="inline-grid min-w-full grid-flow-col grid-rows-7 gap-1">
+                                {heatmap.map((level, index) => {
+                                    const levelClass =
+                                        level <= 0
+                                            ? 'bg-surface-highest'
+                                            : level === 1
                                                 ? 'bg-primary/40'
-                                                : level === 3
-                                                    ? 'bg-primary/70'
-                                                    : 'bg-primary'
+                                                : level === 2
+                                                    ? 'bg-primary/60'
+                                                    : level === 3
+                                                        ? 'bg-primary/80'
+                                                        : 'bg-primary'
 
-                                return <div key={index} className={`h-1.5 w-1.5 rounded-[1px] ${levelClass}`}/>
-                            })}
-                        </div>
-                    </div>
+                                    const commitCount = dailyValues[index] ?? 0
+                                    const commitDate = dailyDates[index] ?? ''
 
-                    <div className="mt-2 flex items-center justify-between gap-2">
-                        <div className="text-[8px] text-muted-foreground">
-                            <span className="font-bold text-foreground">Total: {totalCommits}</span> commits
+                                    return (
+                                        <Tooltip key={index}>
+                                            <TooltipTrigger asChild>
+                                                <button
+                                                    type="button"
+                                                    className={`h-3.5 w-3.5 rounded-[1px] ${levelClass}`}
+                                                    aria-label={`${commitCount} commits em ${formatContributionDate(commitDate)}`}
+                                                />
+                                            </TooltipTrigger>
+                                            <TooltipContent side="top" align="center">
+                                                <div className="text-[10px] font-semibold">{commitCount} commits</div>
+                                                <div className="text-[9px] text-muted-foreground">{formatContributionDate(commitDate)}</div>
+                                            </TooltipContent>
+                                        </Tooltip>
+                                    )
+                                })}
+                            </div>
                         </div>
-                        <div className="flex flex-wrap justify-end gap-1.5 text-[8px] font-bold uppercase text-muted-foreground">
-                            {heatmapMonthLabels.map((month) => (
-                                <span key={month}>{month}</span>
-                            ))}
+
+                        <div className="mt-2 flex items-center justify-between gap-2">
+                            <div className="text-[8px] text-muted-foreground">
+                                <span className="font-bold text-foreground">Total: {totalCommits}</span> commits
+                            </div>
+                            <div className="flex flex-wrap justify-end gap-1.5 text-[8px] font-bold uppercase text-muted-foreground">
+                                {heatmapMonthLabels.map((month) => (
+                                    <span key={month}>{month}</span>
+                                ))}
+                            </div>
                         </div>
-                    </div>
-                </section>
+                    </section>
+                </TooltipProvider>
 
                 <section className="space-y-1.5">
                     <div className="flex items-center justify-between">

@@ -2,9 +2,7 @@ package main
 
 import (
 	"embed"
-	"flag"
 	"git-stats/internal/app"
-	"git-stats/internal/gitstats"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -36,18 +34,4 @@ func main() {
 	if err != nil {
 		println("Error:", err.Error())
 	}
-
-	var folder string
-	var email string
-
-	flag.StringVar(&folder, "add", "", "add a new folder to scan for Git repositories")
-	flag.StringVar(&email, "email", "myemail@example.com", "the email to scan")
-	flag.Parse()
-
-	if folder != "" {
-		gitstats.Scan(folder)
-		return
-	}
-
-	gitstats.Stats(email)
 }

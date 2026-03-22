@@ -2,7 +2,6 @@ package gitstats
 
 import (
 	"errors"
-	"fmt"
 	"math"
 	"path/filepath"
 	"sort"
@@ -44,31 +43,10 @@ type repoSnapshot struct {
 	recentCommits []RecentCommit
 }
 
-func Stats(email string) {
-	snapshot, err := BuildDashboardSnapshot(email, defaultWeeks, defaultRecentLimit)
-	if err != nil {
-		fmt.Printf("Erro ao calcular estatísticas: %v\n", err)
-		return
-	}
-
-	totalCommits, avgPerWeek := deriveMetricsFromDailyCommits(snapshot.DailyCommits, snapshot.WindowDays)
-
-	fmt.Printf("Total de commits: %d\n", totalCommits)
-	fmt.Printf("Média semanal: %d\n", avgPerWeek)
-}
-
 func BuildDashboardSnapshot(email string, weeks int, recentLimit int) (DashboardSnapshot, error) {
 	email = strings.TrimSpace(email)
 	if email == "" {
 		return DashboardSnapshot{}, ErrEmailNotConfigured
-	}
-
-	if weeks <= 0 {
-		weeks = defaultWeeks
-	}
-
-	if recentLimit <= 0 {
-		recentLimit = defaultRecentLimit
 	}
 
 	repos := parseFileLinesToSlice(getDotFilePath())
