@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/user"
+	"path/filepath"
 	"strings"
 )
 
@@ -38,8 +39,12 @@ func shouldSkipDirectory(name string) bool {
 }
 
 func Scan(folder string) {
-	fmt.Println("Scanning ", folder)
-	repos := recursiveScanFolder(folder)
+	absPath, err := filepath.Abs(folder)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("Scanning ", absPath)
+	repos := recursiveScanFolder(absPath)
 	gitStatsDotFile := getDotFilePath()
 	addNewRepos(gitStatsDotFile, repos)
 	fmt.Println("Successfully added")
