@@ -1,8 +1,7 @@
-package main
+package gitstats
 
 import (
 	"bufio"
-	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -38,7 +37,7 @@ func shouldSkipDirectory(name string) bool {
 	return skip
 }
 
-func scan(folder string) {
+func Scan(folder string) {
 	fmt.Println("Scanning ", folder)
 	repos := recursiveScanFolder(folder)
 	gitStatsDotFile := getDotFilePath()
@@ -51,7 +50,6 @@ func getDotFilePath() string {
 	if err != nil {
 		log.Fatal(err)
 	}
-	// dotFile := usr.HomeDir + "/.gitstats"
 	dotFile := ".gitstats"
 	return dotFile
 }
@@ -140,24 +138,4 @@ func openFile(filePath string) *os.File {
 		panic(err)
 	}
 	return f
-}
-
-func stats(email string) {
-	fmt.Println("stats", email)
-}
-
-func main() {
-	var folder string
-	var email string
-
-	flag.StringVar(&folder, "add", "", "add a new folder to scan for Git repositories")
-	flag.StringVar(&email, "email", "your@email.com", "the email to scan")
-	flag.Parse()
-
-	if folder != "" {
-		scan(folder)
-		return
-	}
-
-	stats(email)
 }
