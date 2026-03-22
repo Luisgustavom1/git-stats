@@ -14,8 +14,8 @@ import (
 	"github.com/go-git/go-git/v6/plumbing/storer"
 )
 
-const defaultWeeks = 6
-const defaultRecentLimit = 4
+const defaultWeeks = 26
+const defaultRecentLimit = 20
 
 var ErrEmailNotConfigured = errors.New("email não configurado")
 var ErrNoRepositoriesConfigured = errors.New("nenhum repositório configurado")

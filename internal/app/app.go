@@ -25,7 +25,7 @@ func (a *App) Startup(ctx context.Context) {
 
 func (a *App) GetDashboardSnapshot() (gitstats.DashboardSnapshot, error) {
 	email := strings.TrimSpace("luisgustavomacedo13@gmail.com")
-	snapshot, err := gitstats.BuildDashboardSnapshot(email, 6, 4)
+	snapshot, err := gitstats.BuildDashboardSnapshot(email, 26, 20)
 	if err != nil {
 		return gitstats.DashboardSnapshot{}, friendlyDashboardError(err)
 	}
@@ -35,6 +35,8 @@ func (a *App) GetDashboardSnapshot() (gitstats.DashboardSnapshot, error) {
 
 func friendlyDashboardError(err error) error {
 	switch {
+	case errors.Is(err, gitstats.ErrEmailNotConfigured):
+		return errors.New("Defina a variável de ambiente GIT_STATS_EMAIL para carregar o dashboard")
 	case errors.Is(err, gitstats.ErrNoRepositoriesConfigured):
 		return errors.New("Nenhum repositório configurado. Adicione pastas com o comando: go run . --add /caminho")
 	case errors.Is(err, gitstats.ErrNoValidRepositories):
