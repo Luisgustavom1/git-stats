@@ -261,13 +261,15 @@ function App() {
                                 {recentCommits.map((commit) => (
                                 <li
                                     key={`${commit.repo}-${commit.date}-${commit.message}`}
-                                    className="rounded-md bg-surface-high p-2.5 transition-colors hover:bg-surface-bright"
+                                    className="rounded-md bg-surface-high p-2.5 transition-colors hover:bg-surface-bright flex justify-between items-end"
                                 >
-                                    <p className="text-sm font-semibold">{commit.message}</p>
-                                    <p className="mt-1 text-xs uppercase tracking-[0.05em] text-muted-foreground">
-                                        {commit.repo} · {commit.author}
-                                    </p>
-                                    <time className="mt-2 block text-xs text-muted-foreground">{formatCommitDate(commit.date)}</time>
+                                    <div>
+                                        <p className="text-sm font-semibold">{commit.message}</p>
+                                        <p className="mt-1 text-xs uppercase tracking-[0.05em] text-muted-foreground">
+                                            {commit.repo} · {commit.author}
+                                        </p>
+                                    </div>
+                                    <time className="mt-2 block text-xs font-bold text-muted-foreground">{formatCommitDate(commit.date)}</time>
                                 </li>
                                 ))}
                             </ul>
@@ -279,4 +281,4 @@ function App() {
     );
 }
 
-export default App;
+export {App};
