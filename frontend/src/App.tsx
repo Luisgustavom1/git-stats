@@ -1,54 +1,124 @@
-import {useMemo} from 'react';
+import {useEffect, useMemo, useState} from 'react';
 import {Activity, FolderGit2, GitCommitHorizontal, RefreshCw} from 'lucide-react';
 import {Badge} from '@/components/ui/badge';
 import {Button} from '@/components/ui/button';
 import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
+import {GetDashboardSnapshot} from '../wailsjs/go/app/App';
  
-type WeeklyCommits = {
+type WeeklyCommit = {
     week: string;
     commits: number;
 };
 
-type RepoCommit = {
+type RecentCommit = {
     repo: string;
     author: string;
     message: string;
     date: string;
 };
 
-const weeklyCommits: WeeklyCommits[] = [
-    {week: 'Sem 1', commits: 18},
-    {week: 'Sem 2', commits: 23},
-    {week: 'Sem 3', commits: 14},
-    {week: 'Sem 4', commits: 31},
-    {week: 'Sem 5', commits: 27},
-    {week: 'Sem 6', commits: 22}
+type DashboardMetrics = {
+    totalCommits: number;
+    activeRepos: number;
+    avgPerWeek: number;
+};
+
+type DashboardSnapshot = {
+    metrics: DashboardMetrics;
+    weeklyCommits: WeeklyCommit[];
+    recentCommits: RecentCommit[];
+    windowDays: number;
+};
+
+const EMPTY_METRICS: DashboardMetrics = {
+    totalCommits: 0,
+    activeRepos: 0,
+    avgPerWeek: 0
+};
+
+const EMPTY_WEEKLY_COMMITS: WeeklyCommit[] = [
+    {week: 'Sem 1', commits: 0},
+    {week: 'Sem 2', commits: 0},
+    {week: 'Sem 3', commits: 0},
+    {week: 'Sem 4', commits: 0},
+    {week: 'Sem 5', commits: 0},
+    {week: 'Sem 6', commits: 0}
 ];
 
-const recentCommits: RepoCommit[] = [
-    {repo: 'git-stats', author: 'Luisa', message: 'feat: criar card de métricas', date: 'Hoje, 09:10'},
-    {repo: 'personal-blog', author: 'Luisa', message: 'fix: ajuste no layout mobile', date: 'Ontem, 21:42'},
-    {repo: 'api-finance', author: 'Luisa', message: 'chore: atualizar dependências', date: 'Ontem, 18:03'},
-    {repo: 'task-manager', author: 'Luisa', message: 'feat: filtro por status', date: '2 dias atrás'}
-];
+function asErrorMessage(value: unknown): string {
+    if (value instanceof Error && value.message) {
+        return value.message;
+    }
+
+    if (typeof value === 'string' && value.length > 0) {
+        return value;
+    }
+
+    return 'Não foi possível carregar as estatísticas agora. Tente novamente.';
+}
+
+function formatCommitDate(value: string): string {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+        return value;
+    }
+
+    return new Intl.DateTimeFormat('pt-BR', {
+        dateStyle: 'short',
+        timeStyle: 'short'
+    }).format(parsed);
+}
 
 function App() {
+    const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const [isLoading, setIsLoading] = useState(true);
+    const [isRefreshing, setIsRefreshing] = useState(false);
+
+    const loadSnapshot = async (mode: 'initial' | 'refresh') => {
+        if (mode === 'refresh' && (isRefreshing || isLoading)) {
+            return;
+        }
+
+        if (mode === 'initial') {
+            setIsLoading(true);
+        } else {
+            setIsRefreshing(true);
+        }
+
+        setError(null);
+
+        try {
+            const nextSnapshot = await GetDashboardSnapshot();
+            setSnapshot(nextSnapshot);
+        } catch (loadError) {
+            setError(asErrorMessage(loadError));
+            if (mode === 'initial') {
+                setSnapshot(null);
+            }
+        } finally {
+            if (mode === 'initial') {
+                setIsLoading(false);
+            } else {
+                setIsRefreshing(false);
+            }
+        }
+    };
+
+    useEffect(() => {
+        void loadSnapshot('initial');
+    }, []);
+
+    const weeklyCommits = snapshot?.weeklyCommits?.length ? snapshot.weeklyCommits : EMPTY_WEEKLY_COMMITS;
+    const metrics = snapshot?.metrics ?? EMPTY_METRICS;
+    const recentCommits = snapshot?.recentCommits ?? [];
+    const windowDays = snapshot?.windowDays ?? 42;
+    const isEmpty = !isLoading && !error && metrics.totalCommits === 0;
+
     const maxCommits = useMemo(
         () => Math.max(...weeklyCommits.map((item) => item.commits), 1),
-        []
+        [weeklyCommits]
     );
-
-    const metrics = useMemo(() => {
-        const totalCommits = weeklyCommits.reduce((acc, item) => acc + item.commits, 0);
-        const activeRepos = new Set(recentCommits.map((item) => item.repo)).size;
-        const avgPerWeek = Math.round(totalCommits / weeklyCommits.length);
-
-        return {
-            totalCommits,
-            activeRepos,
-            avgPerWeek
-        };
-    }, []);
 
     return (
         <main className="mx-auto grid max-w-7xl gap-5 px-3 py-4 md:px-4 md:py-5">
@@ -63,8 +133,10 @@ function App() {
                             aria-label="Atualizar snapshot"
                             title="Atualizar snapshot"
                             className="h-8 w-8 rounded-full p-0 opacity-80 hover:opacity-100"
+                            onClick={() => void loadSnapshot('refresh')}
+                            disabled={isLoading || isRefreshing}
                         >
-                            <RefreshCw className="h-3.5 w-3.5"/>
+                            <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`}/>
                         </Button>
                     </header>
                     <h1 className="text-3xl font-extrabold tracking-[-0.02em] text-foreground md:text-4xl">
@@ -73,7 +145,7 @@ function App() {
                     <p className="max-w-xl text-sm text-muted-foreground">
                         Um panorama dos seus últimos commits com foco em ritmo, impacto e consistência entre repositórios.
                     </p>
-                    <Badge className="bg-secondary text-secondary-foreground">últimos 42 dias</Badge>
+                    <Badge className="bg-secondary text-secondary-foreground">últimos {windowDays} dias</Badge>
                 </div>
 
                 <Card className="relative bg-gradient-to-br from-[#7bdb80] to-[#238636] text-[#08120b]">
@@ -81,8 +153,10 @@ function App() {
                         <CardTitle className="text-xs uppercase tracking-[0.05em] text-[#122718]/80">Impacto total</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-1 p-4 pt-0">
-                        <p className="text-5xl font-extrabold tracking-[-0.02em]">{metrics.totalCommits}</p>
-                        <p className="text-xs font-medium text-[#122718]/85">commits no período selecionado</p>
+                        <p className="text-5xl font-extrabold tracking-[-0.02em]">{isLoading ? '…' : metrics.totalCommits}</p>
+                        <p className="text-xs font-medium text-[#122718]/85">
+                            {error ? 'falha ao carregar o período' : 'commits no período selecionado'}
+                        </p>
                     </CardContent>
                 </Card>
             </section>
@@ -95,7 +169,7 @@ function App() {
                         </CardTitle>
                     </CardHeader>
                     <CardContent className="p-4 pt-0">
-                        <p className="text-3xl font-extrabold tracking-[-0.02em]">{metrics.totalCommits}</p>
+                        <p className="text-3xl font-extrabold tracking-[-0.02em]">{isLoading ? '…' : metrics.totalCommits}</p>
                     </CardContent>
                 </Card>
 
@@ -106,7 +180,7 @@ function App() {
                         </CardTitle>
                     </CardHeader>
                     <CardContent className="p-4 pt-0">
-                        <p className="text-3xl font-extrabold tracking-[-0.02em]">{metrics.activeRepos}</p>
+                        <p className="text-3xl font-extrabold tracking-[-0.02em]">{isLoading ? '…' : metrics.activeRepos}</p>
                     </CardContent>
                 </Card>
 
@@ -117,7 +191,7 @@ function App() {
                         </CardTitle>
                     </CardHeader>
                     <CardContent className="p-4 pt-0">
-                        <p className="text-3xl font-extrabold tracking-[-0.02em]">{metrics.avgPerWeek}</p>
+                        <p className="text-3xl font-extrabold tracking-[-0.02em]">{isLoading ? '…' : metrics.avgPerWeek}</p>
                     </CardContent>
                 </Card>
             </section>
@@ -153,6 +227,12 @@ function App() {
                                 );
                             })}
                         </div>
+                        {error ? (
+                            <p className="mt-3 text-sm text-muted-foreground">{error}</p>
+                        ) : null}
+                        {isEmpty ? (
+                            <p className="mt-3 text-sm text-muted-foreground">Sem commits no período selecionado.</p>
+                        ) : null}
                     </CardContent>
                 </Card>
 
@@ -161,8 +241,24 @@ function App() {
                         <CardTitle className="text-lg">Últimos commits</CardTitle>
                     </CardHeader>
                     <CardContent className="p-4 pt-0">
-                        <ul className="space-y-2.5">
-                            {recentCommits.map((commit) => (
+                        {error ? (
+                            <div className="space-y-3">
+                                <p className="text-sm text-muted-foreground">{error}</p>
+                                <Button variant="secondary" size="sm" onClick={() => void loadSnapshot('initial')}>
+                                    Tentar novamente
+                                </Button>
+                            </div>
+                        ) : null}
+
+                        {!error && recentCommits.length === 0 ? (
+                            <p className="text-sm text-muted-foreground">
+                                {isLoading ? 'Carregando commits recentes...' : 'Nenhum commit recente encontrado.'}
+                            </p>
+                        ) : null}
+
+                        {!error && recentCommits.length > 0 ? (
+                            <ul className="space-y-2.5">
+                                {recentCommits.map((commit) => (
                                 <li
                                     key={`${commit.repo}-${commit.date}-${commit.message}`}
                                     className="rounded-md bg-surface-high p-2.5 transition-colors hover:bg-surface-bright"
@@ -171,10 +267,11 @@ function App() {
                                     <p className="mt-1 text-xs uppercase tracking-[0.05em] text-muted-foreground">
                                         {commit.repo} · {commit.author}
                                     </p>
-                                    <time className="mt-2 block text-xs text-muted-foreground">{commit.date}</time>
+                                    <time className="mt-2 block text-xs text-muted-foreground">{formatCommitDate(commit.date)}</time>
                                 </li>
-                            ))}
-                        </ul>
+                                ))}
+                            </ul>
+                        ) : null}
                     </CardContent>
                 </Card>
             </section>

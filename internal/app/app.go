@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
-	"fmt"
+	"errors"
+	"git-stats/internal/gitstats"
+	"strings"
 )
 
 // App struct
@@ -21,12 +23,23 @@ func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
 }
 
-// Greet returns a greeting for the given name
-func (a *App) Greet(name string) string {
-	return fmt.Sprintf("Hello %s, It's show time!", name)
+func (a *App) GetDashboardSnapshot() (gitstats.DashboardSnapshot, error) {
+	email := strings.TrimSpace("luisgustavomacedo13@gmail.com")
+	snapshot, err := gitstats.BuildDashboardSnapshot(email, 6, 4)
+	if err != nil {
+		return gitstats.DashboardSnapshot{}, friendlyDashboardError(err)
+	}
+
+	return snapshot, nil
 }
 
-// Greet returns a greeting for the given name
-func (a *App) Bye(name string) string {
-	return fmt.Sprintf("Goodbye %s!", name)
+func friendlyDashboardError(err error) error {
+	switch {
+	case errors.Is(err, gitstats.ErrNoRepositoriesConfigured):
+		return errors.New("Nenhum repositório configurado. Adicione pastas com o comando: go run . --add /caminho")
+	case errors.Is(err, gitstats.ErrNoValidRepositories):
+		return errors.New("Nenhum repositório válido encontrado no arquivo .gitstats")
+	default:
+		return errors.New("Não foi possível carregar as estatísticas agora. Tente novamente")
+	}
 }

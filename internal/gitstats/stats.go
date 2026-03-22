@@ -1,240 +1,222 @@
 package gitstats
 
 import (
+	"errors"
 	"fmt"
+	"math"
+	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing/object"
+	"github.com/go-git/go-git/v6/plumbing/storer"
 )
 
-const daysInLastSixMonths = 183
-const outOfRange = -1
-const weeksInLastSixMonths = 26
+const defaultWeeks = 6
+const defaultRecentLimit = 4
 
-type column []int
+var ErrEmailNotConfigured = errors.New("email não configurado")
+var ErrNoRepositoriesConfigured = errors.New("nenhum repositório configurado")
+var ErrNoValidRepositories = errors.New("nenhum repositório válido encontrado")
+
+type WeeklyCommit struct {
+	Week    string `json:"week"`
+	Commits int    `json:"commits"`
+}
+
+type RecentCommit struct {
+	Repo    string `json:"repo"`
+	Author  string `json:"author"`
+	Message string `json:"message"`
+	Date    string `json:"date"`
+}
+
+type DashboardMetrics struct {
+	TotalCommits int `json:"totalCommits"`
+	ActiveRepos  int `json:"activeRepos"`
+	AvgPerWeek   int `json:"avgPerWeek"`
+}
+
+type DashboardSnapshot struct {
+	Metrics       DashboardMetrics `json:"metrics"`
+	WeeklyCommits []WeeklyCommit   `json:"weeklyCommits"`
+	RecentCommits []RecentCommit   `json:"recentCommits"`
+	WindowDays    int              `json:"windowDays"`
+}
+
+type repoSnapshot struct {
+	weekCounts      []int
+	recentCommits   []RecentCommit
+	windowHasCommit bool
+}
 
 func Stats(email string) {
-	commitsPerDay := processRepositories(email)
-	printCommits(commitsPerDay)
+	snapshot, err := BuildDashboardSnapshot(email, defaultWeeks, defaultRecentLimit)
+	if err != nil {
+		fmt.Printf("Erro ao calcular estatísticas: %v\n", err)
+		return
+	}
+
+	fmt.Printf("Total de commits: %d\n", snapshot.Metrics.TotalCommits)
+	fmt.Printf("Repositórios ativos: %d\n", snapshot.Metrics.ActiveRepos)
+	fmt.Printf("Média semanal: %d\n", snapshot.Metrics.AvgPerWeek)
 }
 
-func processRepositories(email string) map[int]int {
-	gitStatsDotFile := getDotFilePath()
-	repos := parseFileLinesToSlice(gitStatsDotFile)
-	daysInMap := daysInLastSixMonths
-	commits := make(map[int]int, daysInMap)
-
-	for i := daysInMap; i > 0; i-- {
-		commits[i] = 0
+func BuildDashboardSnapshot(email string, weeks int, recentLimit int) (DashboardSnapshot, error) {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return DashboardSnapshot{}, ErrEmailNotConfigured
 	}
+
+	if weeks <= 0 {
+		weeks = defaultWeeks
+	}
+
+	if recentLimit <= 0 {
+		recentLimit = defaultRecentLimit
+	}
+
+	repos := parseFileLinesToSlice(getDotFilePath())
+	if len(repos) == 0 {
+		return DashboardSnapshot{}, ErrNoRepositoriesConfigured
+	}
+
+	now := time.Now()
+	windowDays := weeks * 7
+	windowStart := getBeginningOfDay(now).AddDate(0, 0, -(windowDays - 1))
+
+	totalWeekCounts := make([]int, weeks)
+	recentCommits := make([]RecentCommit, 0, recentLimit)
+	activeRepos := make(map[string]struct{})
+	validRepos := 0
+
 	for _, path := range repos {
-		fillCommits(email, path, commits)
+		result, err := collectRepoSnapshot(path, email, windowStart, now, weeks)
+		if err != nil {
+			continue
+		}
+
+		validRepos++
+		for i, count := range result.weekCounts {
+			totalWeekCounts[i] += count
+		}
+
+		if result.windowHasCommit {
+			activeRepos[path] = struct{}{}
+		}
+
+		recentCommits = append(recentCommits, result.recentCommits...)
 	}
-	return commits
+
+	if validRepos == 0 {
+		return DashboardSnapshot{}, ErrNoValidRepositories
+	}
+
+	if len(recentCommits) > 0 {
+		sort.Slice(recentCommits, func(i, j int) bool {
+			return recentCommits[i].Date > recentCommits[j].Date
+		})
+		if len(recentCommits) > recentLimit {
+			recentCommits = recentCommits[:recentLimit]
+		}
+	}
+
+	totalCommits := 0
+	for _, count := range totalWeekCounts {
+		totalCommits += count
+	}
+
+	return DashboardSnapshot{
+		Metrics: DashboardMetrics{
+			TotalCommits: totalCommits,
+			ActiveRepos:  len(activeRepos),
+			AvgPerWeek:   int(math.Round(float64(totalCommits) / float64(weeks))),
+		},
+		WeeklyCommits: toWeeklyCommits(totalWeekCounts),
+		RecentCommits: recentCommits,
+		WindowDays:    windowDays,
+	}, nil
 }
 
-func fillCommits(email string, path string, commits map[int]int) {
+func collectRepoSnapshot(path string, email string, windowStart time.Time, now time.Time, weeks int) (repoSnapshot, error) {
 	repo, err := git.PlainOpen(path)
 	if err != nil {
-		panic(err)
+		return repoSnapshot{}, err
 	}
 
 	ref, err := repo.Head()
 	if err != nil {
-		panic(err)
+		return repoSnapshot{}, err
 	}
 
 	iterator, err := repo.Log(&git.LogOptions{From: ref.Hash()})
 	if err != nil {
-		panic(err)
+		return repoSnapshot{}, err
 	}
 
-	offset := calcOffset()
+	windowDays := weeks * 7
+	weekCounts := make([]int, weeks)
+	recentCommits := make([]RecentCommit, 0, defaultRecentLimit)
+	windowHasCommit := false
+
 	err = iterator.ForEach(func(c *object.Commit) error {
-		daysAgo := countDaysSinceDate(c.Author.When) + offset
 		if c.Author.Email != email {
 			return nil
 		}
 
-		if daysAgo != outOfRange {
-			commits[daysAgo]++
+		commitDay := getBeginningOfDay(c.Author.When)
+		if commitDay.Before(windowStart) {
+			return storer.ErrStop
 		}
+
+		if commitDay.After(now) {
+			return nil
+		}
+
+		daysFromStart := int(commitDay.Sub(windowStart).Hours() / 24)
+		if daysFromStart < 0 || daysFromStart >= windowDays {
+			return nil
+		}
+
+		weekIndex := daysFromStart / 7
+		weekCounts[weekIndex]++
+		windowHasCommit = true
+
+		recentCommits = append(recentCommits, RecentCommit{
+			Repo:    filepath.Base(path),
+			Author:  c.Author.Name,
+			Message: strings.TrimSpace(c.Message),
+			Date:    c.Author.When.UTC().Format(time.RFC3339),
+		})
 
 		return nil
 	})
 
-	if err != nil {
-		panic(err)
+	if err != nil && !errors.Is(err, storer.ErrStop) {
+		return repoSnapshot{}, err
 	}
+
+	return repoSnapshot{
+		weekCounts:      weekCounts,
+		recentCommits:   recentCommits,
+		windowHasCommit: windowHasCommit,
+	}, nil
 }
 
-func countDaysSinceDate(date time.Time) int {
-	days := 0
-	now := getBeginningOfDay(time.Now())
-	for date.Before(now) {
-		date = date.Add(time.Hour * 24)
-		days++
-		if days > daysInLastSixMonths {
-			return outOfRange
-		}
+func toWeeklyCommits(weekCounts []int) []WeeklyCommit {
+	weekly := make([]WeeklyCommit, 0, len(weekCounts))
+	for i, count := range weekCounts {
+		weekly = append(weekly, WeeklyCommit{
+			Week:    fmt.Sprintf("Sem %d", i+1),
+			Commits: count,
+		})
 	}
-	return days
+	return weekly
 }
 
 func getBeginningOfDay(t time.Time) time.Time {
 	year, month, day := t.Date()
-	startOfDay := time.Date(year, month, day, 0, 0, 0, 0, t.Location())
-	return startOfDay
-}
-
-func printCommits(commitsPerDay map[int]int) {
-	days := sortMapIntoSlice(commitsPerDay)
-	cols := buildCols(days, commitsPerDay)
-	printCells(cols)
-}
-
-func sortMapIntoSlice(m map[int]int) []int {
-	var keys []int
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Ints(keys)
-
-	return keys
-}
-
-func buildCols(days []int, commitsPerDay map[int]int) map[int]column {
-	cols := make(map[int]column)
-	col := column{}
-
-	for _, k := range days {
-		week := int(k / 7) //26,25...1
-		dayInWeek := k % 7 // 0,1,2,3,4,5,6
-
-		reset := dayInWeek == 0
-		if reset {
-			col = column{}
-		}
-
-		col = append(col, commitsPerDay[k])
-
-		if dayInWeek == 6 {
-			cols[week] = col
-		}
-	}
-
-	return cols
-}
-
-func printCells(cols map[int]column) {
-	printMonths()
-	for j := 6; j >= 0; j-- {
-		for i := weeksInLastSixMonths + 1; i >= 0; i-- {
-			if i == weeksInLastSixMonths+1 {
-				printDayCol(j)
-			}
-			if col, ok := cols[i]; ok {
-				if i == 0 && j == calcOffset()-1 {
-					printCell(col[j-1], true)
-					continue
-				} else {
-					if len(col) > j {
-						printCell(col[j], false)
-						continue
-					}
-				}
-			}
-			printCell(0, false)
-		}
-		fmt.Printf("\n")
-	}
-}
-
-func printMonths() {
-	week := getBeginningOfDay(time.Now()).Add(-(daysInLastSixMonths * time.Hour * 24))
-	month := week.Month()
-	fmt.Printf("         ")
-	for {
-		if week.Month() != month {
-			fmt.Printf("%s ", week.Month().String()[:3])
-			month = week.Month()
-		} else {
-			fmt.Printf("    ")
-		}
-
-		week = week.Add(7 * time.Hour * 24)
-		if week.After(time.Now()) {
-			break
-		}
-	}
-	fmt.Printf("\n")
-}
-
-func printCell(val int, today bool) {
-	escape := "\033[38;5;250;48;5;236m"
-	switch {
-	case val > 0 && val < 5:
-		escape = "\033[38;5;255;48;5;22m"
-	case val >= 5 && val < 10:
-		escape = "\033[38;5;255;48;5;28m"
-	case val >= 10:
-		escape = "\033[38;5;255;48;5;34m"
-	}
-
-	if today {
-		escape = "\033[1;38;5;255;48;5;25m"
-	}
-
-	if val == 0 {
-		fmt.Printf(escape + "  - " + "\033[0m")
-		return
-	}
-
-	str := "  %d "
-	switch {
-	case val >= 10:
-		str = " %d "
-	case val >= 100:
-		str = "%d "
-	}
-
-	fmt.Printf(escape+str+"\033[0m", val)
-}
-
-func printDayCol(day int) {
-	out := "     "
-	switch day {
-	case 1:
-		out = " Mon "
-	case 3:
-		out = " Wed "
-	case 5:
-		out = " Fri "
-	}
-
-	fmt.Printf(out)
-}
-
-func calcOffset() int {
-	var offset int
-	weekday := time.Now().Weekday()
-	switch weekday {
-	case time.Sunday:
-		offset = 7
-	case time.Monday:
-		offset = 6
-	case time.Tuesday:
-		offset = 5
-	case time.Wednesday:
-		offset = 4
-	case time.Thursday:
-		offset = 3
-	case time.Friday:
-		offset = 2
-	case time.Saturday:
-		offset = 1
-	}
-	return offset
+	return time.Date(year, month, day, 0, 0, 0, 0, t.Location())
 }

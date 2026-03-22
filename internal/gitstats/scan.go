@@ -42,7 +42,7 @@ func Scan(folder string) {
 	repos := recursiveScanFolder(folder)
 	gitStatsDotFile := getDotFilePath()
 	addNewRepos(gitStatsDotFile, repos)
-	fmt.Println("\nSuccesfully added\n")
+	fmt.Println("Successfully added")
 }
 
 func getDotFilePath() string {
@@ -117,25 +117,35 @@ func dumpStringsSliceToFile(repos []string, filePath string) {
 }
 
 func parseFileLinesToSlice(filePath string) []string {
-	f := openFile(filePath)
+	f, err := openFile(filePath)
+	if err != nil {
+		return []string{}
+	}
 	defer f.Close()
+
 	var lines []string
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		lines = append(lines, line)
 	}
-	if err := scanner.Err(); err != nil {
-		if err != io.EOF {
-			panic(err)
+
+	if scanErr := scanner.Err(); scanErr != nil {
+		if scanErr != io.EOF {
+			return []string{}
 		}
 	}
+
 	return lines
 }
 
-func openFile(filePath string) *os.File {
+func openFile(filePath string) (*os.File, error) {
 	f, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	return f
+	return f, nil
 }
