@@ -1,19 +1,17 @@
 export namespace gitstats {
 	
-	export class DashboardMetrics {
-	    totalCommits: number;
-	    activeRepos: number;
-	    avgPerWeek: number;
+	export class DailyCommit {
+	    date: string;
+	    commits: number;
 	
 	    static createFrom(source: any = {}) {
-	        return new DashboardMetrics(source);
+	        return new DailyCommit(source);
 	    }
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.totalCommits = source["totalCommits"];
-	        this.activeRepos = source["activeRepos"];
-	        this.avgPerWeek = source["avgPerWeek"];
+	        this.date = source["date"];
+	        this.commits = source["commits"];
 	    }
 	}
 	export class RecentCommit {
@@ -34,23 +32,8 @@ export namespace gitstats {
 	        this.date = source["date"];
 	    }
 	}
-	export class WeeklyCommit {
-	    week: string;
-	    commits: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new WeeklyCommit(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.week = source["week"];
-	        this.commits = source["commits"];
-	    }
-	}
 	export class DashboardSnapshot {
-	    metrics: DashboardMetrics;
-	    weeklyCommits: WeeklyCommit[];
+	    dailyCommits: DailyCommit[];
 	    recentCommits: RecentCommit[];
 	    windowDays: number;
 	
@@ -60,8 +43,7 @@ export namespace gitstats {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.metrics = this.convertValues(source["metrics"], DashboardMetrics);
-	        this.weeklyCommits = this.convertValues(source["weeklyCommits"], WeeklyCommit);
+	        this.dailyCommits = this.convertValues(source["dailyCommits"], DailyCommit);
 	        this.recentCommits = this.convertValues(source["recentCommits"], RecentCommit);
 	        this.windowDays = source["windowDays"];
 	    }
@@ -84,7 +66,6 @@ export namespace gitstats {
 		    return a;
 		}
 	}
-	
 
 }
 

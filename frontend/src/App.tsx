@@ -5,7 +5,10 @@ import {GitCommitHorizontal, History} from 'lucide-react'
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
 
-const monthLabels = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+function formatMonthLabel(date: Date): string {
+    const value = new Intl.DateTimeFormat('pt-BR', {month: 'short'}).format(date).replace('.', '')
+    return value.charAt(0).toUpperCase() + value.slice(1)
+}
 
 function formatRelativeDate(isoDate: string): string {
     const now = Date.now()
@@ -55,6 +58,22 @@ function buildAreaPath(points: number[]): string {
     return `${linePath} L100,100 L0,100 Z`
 }
 
+function aggregateDailyToWeekly(dayValues: number[]): number[] {
+    if (dayValues.length === 0) {
+        return [0]
+    }
+
+    const weekCount = Math.ceil(dayValues.length / 7)
+    const weekly = Array.from({length: weekCount}, () => 0)
+
+    dayValues.forEach((value, dayIndex) => {
+        const weekIndex = Math.floor(dayIndex / 7)
+        weekly[weekIndex] += value
+    })
+
+    return weekly
+}
+
 function App() {
     const [state, setState] = useState<LoadState>('idle')
     const [error, setError] = useState('')
@@ -91,58 +110,67 @@ function App() {
         }
     }, [])
 
-    const weeklyValues = useMemo(() => {
-        if (!snapshot?.weeklyCommits?.length) {
-            return [0, 0, 0, 0, 0, 0, 0, 0]
+    const dailyValues = useMemo(() => {
+        const fallbackDays = snapshot?.windowDays ?? 182
+        if (!snapshot?.dailyCommits?.length) {
+            return Array.from({length: fallbackDays}, () => 0)
         }
-        return snapshot.weeklyCommits.map((item) => item.commits)
+        return snapshot.dailyCommits.map((item) => item.commits)
     }, [snapshot])
 
-    const graphPath = useMemo(() => buildGraphPath(weeklyValues), [weeklyValues])
+    const weeklyValues = useMemo(() => aggregateDailyToWeekly(dailyValues), [dailyValues])
+
     const areaPath = useMemo(() => buildAreaPath(weeklyValues), [weeklyValues])
 
     const heatmap = useMemo(() => {
-        if (!snapshot?.weeklyCommits?.length) {
-            return Array.from({length: 52 * 7}, () => 0)
-        }
+        const maxDayCommits = Math.max(...dailyValues, 1)
+        return dailyValues.map((value) => Math.min(Math.floor((value / maxDayCommits) * 4), 4))
+    }, [dailyValues])
 
-        const maxWeekCommits = Math.max(...snapshot.weeklyCommits.map((item) => item.commits), 1)
+    const heatmapMonthLabels = useMemo(() => {
+        const months = 6
+        const now = new Date()
 
-        return Array.from({length: 52 * 7}, (_, index) => {
-            const weekIndex = Math.floor(index / 7)
-            const mappedWeek = Math.floor((weekIndex / 52) * snapshot.weeklyCommits.length)
-            const value = snapshot.weeklyCommits[mappedWeek]?.commits ?? 0
-            return Math.min(Math.floor((value / maxWeekCommits) * 4), 4)
+        return Array.from({length: months}, (_, index) => {
+            const monthDate = new Date(now.getFullYear(), now.getMonth() - (months - 1 - index), 1)
+            return formatMonthLabel(monthDate)
         })
-    }, [snapshot])
+    }, [])
 
-    const totalCommits = snapshot?.metrics.totalCommits ?? 0
-    const avgPerWeek = snapshot?.metrics.avgPerWeek ?? 0
+    const totalCommits = useMemo(
+        () => dailyValues.reduce((accumulator, value) => accumulator + value, 0),
+        [dailyValues]
+    )
+    const avgPerWeek = useMemo(() => {
+        const windowDays = snapshot?.windowDays ?? dailyValues.length
+        if (windowDays <= 0) {
+            return 0
+        }
+        return Math.round((totalCommits * 7) / windowDays)
+    }, [dailyValues.length, snapshot?.windowDays, totalCommits])
+    const maxWeeklyCommits = Math.max(...weeklyValues, 0)
 
     return (
-        <div className="min-h-screen bg-surface text-foreground pb-24">
-            <main className="mx-auto max-w-2xl space-y-8 px-4 pt-6">
-                <section className="space-y-4">
+        <div className="h-screen overflow-hidden bg-surface text-foreground">
+            <main className="mx-auto h-full w-full space-y-2 overflow-y-auto px-2 py-2">
+                <section className="space-y-1.5">
                     <div className="flex items-end justify-between">
-                        <div>
-                            <span className="text-[0.7rem] font-bold uppercase tracking-widest text-muted-foreground">Insights</span>
-                            <h2 className="text-2xl font-bold tracking-tight text-foreground">Commit Activity</h2>
-                        </div>
-                        <div className="text-right">
-                            <span className="text-lg font-bold text-primary">{avgPerWeek}/sem</span>
-                            <p className="text-[0.65rem] uppercase tracking-wider text-muted-foreground">média de commits</p>
+                        <h2 className="text-sm font-bold tracking-tight text-foreground">Commit Activity</h2>
+                        <div className="text-right flex gap-1 items-center">
+                            <p className="text-[0.55rem] uppercase tracking-wider text-muted-foreground">média</p>
+                            <span className="text-xs font-bold text-primary">{avgPerWeek}/sem</span>
                         </div>
                     </div>
 
-                    <div className="relative h-64 overflow-hidden rounded-xl bg-surface-low p-6">
-                        <div className="absolute inset-0 flex flex-col justify-between p-6 opacity-10">
+                    <div className="relative h-24 overflow-hidden rounded-lg bg-surface-low p-2">
+                        <div className="absolute inset-0 flex flex-col justify-between p-2 opacity-10">
                             <div className="border-b border-foreground"/>
                             <div className="border-b border-foreground"/>
                             <div className="border-b border-foreground"/>
                             <div className="border-b border-foreground"/>
                         </div>
 
-                        <svg className="absolute inset-0 h-full w-full px-6 pb-6 pt-10" preserveAspectRatio="none" viewBox="0 0 100 100">
+                        <svg className="absolute inset-0 h-full w-full px-2 pb-2 pt-4" preserveAspectRatio="none" viewBox="0 0 100 100">
                             <defs>
                                 <linearGradient id="commitFill" x1="0" x2="0" y1="0" y2="1">
                                     <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity="0.45"/>
@@ -150,32 +178,40 @@ function App() {
                                 </linearGradient>
                             </defs>
                             <path d={areaPath} fill="url(#commitFill)"/>
-                            <path d={graphPath} fill="none" stroke="hsl(var(--primary))" strokeLinecap="round" strokeWidth="2"/>
                         </svg>
 
-                        <div className="absolute bottom-4 left-6 right-6 flex justify-between text-[0.6rem] font-bold uppercase tracking-widest text-muted-foreground">
-                            <span>{snapshot?.windowDays ?? 0} dias atrás</span>
+                        <div className="absolute left-2 top-1.5 flex items-center gap-1 text-[8px] font-semibold text-muted-foreground">
+                            <span className="inline-block h-[1px] w-3 rounded-full bg-primary"/>
+                            <span>Série semanal</span>
+                        </div>
+
+                        <div className="absolute right-2 top-1.5 text-[8px] font-semibold text-muted-foreground">
+                            Máx: {maxWeeklyCommits}
+                        </div>
+
+                        <div className="absolute bottom-1.5 left-2 right-2 flex justify-between text-[0.5rem] font-bold uppercase tracking-widest text-muted-foreground">
+                            <span>6 meses</span>
                             <span>Hoje</span>
                         </div>
                     </div>
                 </section>
 
-                <section className="overflow-hidden rounded-xl border border-white/5 bg-surface-low p-4 sm:p-6">
-                    <div className="mb-4 flex items-center justify-between gap-2">
-                        <h3 className="text-sm font-bold text-foreground">Contribuições no período</h3>
-                        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                <section className="overflow-hidden rounded-lg border border-white/5 bg-surface-low p-2">
+                    <div className="mb-2 flex items-center justify-between gap-1">
+                        <h3 className="text-[10px] font-bold text-foreground">Contribuições</h3>
+                        <div className="flex items-center gap-1 text-[8px] uppercase tracking-wider text-muted-foreground">
                             <span>Menos</span>
-                            <div className="h-2.5 w-2.5 rounded-sm bg-surface-highest"/>
-                            <div className="h-2.5 w-2.5 rounded-sm bg-primary/30"/>
-                            <div className="h-2.5 w-2.5 rounded-sm bg-primary/60"/>
-                            <div className="h-2.5 w-2.5 rounded-sm bg-primary/80"/>
-                            <div className="h-2.5 w-2.5 rounded-sm bg-primary"/>
+                            <div className="h-1.5 w-1.5 rounded-[2px] bg-surface-highest"/>
+                            <div className="h-1.5 w-1.5 rounded-[2px] bg-primary/30"/>
+                            <div className="h-1.5 w-1.5 rounded-[2px] bg-primary/60"/>
+                            <div className="h-1.5 w-1.5 rounded-[2px] bg-primary/80"/>
+                            <div className="h-1.5 w-1.5 rounded-[2px] bg-primary"/>
                             <span>Mais</span>
                         </div>
                     </div>
 
                     <div className="hide-scrollbar overflow-x-auto">
-                        <div className="inline-grid min-w-full grid-flow-col grid-rows-7 gap-1.5">
+                        <div className="inline-grid min-w-full grid-flow-col grid-rows-7 gap-1">
                             {heatmap.map((level, index) => {
                                 const levelClass =
                                     level <= 0
@@ -188,55 +224,52 @@ function App() {
                                                     ? 'bg-primary/70'
                                                     : 'bg-primary'
 
-                                return <div key={index} className={`h-2.5 w-2.5 rounded-[2px] ${levelClass}`}/>
+                                return <div key={index} className={`h-1.5 w-1.5 rounded-[1px] ${levelClass}`}/>
                             })}
                         </div>
                     </div>
 
-                    <div className="mt-4 flex items-center justify-between gap-4">
-                        <div className="text-[10px] text-muted-foreground">
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                        <div className="text-[8px] text-muted-foreground">
                             <span className="font-bold text-foreground">Total: {totalCommits}</span> commits
                         </div>
-                        <div className="flex flex-wrap justify-end gap-2 text-[9px] font-bold uppercase text-muted-foreground">
-                            {monthLabels.map((month) => (
+                        <div className="flex flex-wrap justify-end gap-1.5 text-[8px] font-bold uppercase text-muted-foreground">
+                            {heatmapMonthLabels.map((month) => (
                                 <span key={month}>{month}</span>
                             ))}
                         </div>
                     </div>
                 </section>
 
-                <section className="space-y-4">
+                <section className="space-y-1.5">
                     <div className="flex items-center justify-between">
-                        <h3 className="text-lg font-bold tracking-tight text-foreground">Recent Activity</h3>
-                        <button className="text-[0.7rem] font-bold uppercase tracking-widest text-primary" type="button">
-                            View History
-                        </button>
+                        <h3 className="text-xs font-bold tracking-tight text-foreground">Recent Activity</h3>
                     </div>
 
-                    <div className="space-y-2">
+                    <div className="space-y-1">
                         {state === 'loading' && (
-                            <div className="rounded-xl bg-surface-low p-4 text-sm text-muted-foreground">Carregando atividade…</div>
+                            <div className="rounded-lg bg-surface-low p-2 text-[10px] text-muted-foreground">Carregando atividade…</div>
                         )}
 
                         {state === 'error' && (
-                            <div className="rounded-xl bg-surface-low p-4 text-sm text-red-300">{error}</div>
+                            <div className="rounded-lg bg-surface-low p-2 text-[10px] text-red-300">{error}</div>
                         )}
 
                         {state === 'ready' && snapshot?.recentCommits.length === 0 && (
-                            <div className="rounded-xl bg-surface-low p-4 text-sm text-muted-foreground">Nenhum commit recente encontrado.</div>
+                            <div className="rounded-lg bg-surface-low p-2 text-[10px] text-muted-foreground">Nenhum commit recente encontrado.</div>
                         )}
 
                         {snapshot?.recentCommits.map((commit, index) => (
-                            <div key={`${commit.repo}-${commit.date}-${index}`} className="flex items-start gap-4 rounded-xl p-4 transition-colors hover:bg-surface-high">
-                                <div className="mt-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-surface-highest text-muted-foreground">
-                                    {index === 0 ? <GitCommitHorizontal size={16} className="text-primary"/> : <History size={16}/>} 
+                            <div key={`${commit.repo}-${commit.date}-${index}`} className="flex items-start gap-2 rounded-lg p-2 transition-colors hover:bg-surface-high">
+                                <div className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md bg-surface-highest text-muted-foreground">
+                                    {index === 0 ? <GitCommitHorizontal size={12} className="text-primary"/> : <History size={12}/>} 
                                 </div>
                                 <div className="min-w-0 flex-1">
                                     <div className="flex items-baseline justify-between gap-2">
-                                        <h4 className="truncate text-sm font-bold text-foreground">{commit.repo}</h4>
-                                        <span className="flex-shrink-0 text-[0.65rem] text-muted-foreground">{formatRelativeDate(commit.date)}</span>
+                                        <h4 className="truncate text-[10px] font-bold text-foreground">{commit.repo}</h4>
+                                        <span className="flex-shrink-0 text-[8px] text-muted-foreground">{formatRelativeDate(commit.date)}</span>
                                     </div>
-                                    <p className="mt-1 truncate text-xs italic text-muted-foreground">“{commit.message}”</p>
+                                    <p className="mt-0.5 truncate text-[9px] italic text-muted-foreground">“{commit.message}”</p>
                                 </div>
                             </div>
                         ))}

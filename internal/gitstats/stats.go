@@ -21,8 +21,8 @@ var ErrEmailNotConfigured = errors.New("email não configurado")
 var ErrNoRepositoriesConfigured = errors.New("nenhum repositório configurado")
 var ErrNoValidRepositories = errors.New("nenhum repositório válido encontrado")
 
-type WeeklyCommit struct {
-	Week    string `json:"week"`
+type DailyCommit struct {
+	Date    string `json:"date"`
 	Commits int    `json:"commits"`
 }
 
@@ -33,23 +33,15 @@ type RecentCommit struct {
 	Date    string `json:"date"`
 }
 
-type DashboardMetrics struct {
-	TotalCommits int `json:"totalCommits"`
-	ActiveRepos  int `json:"activeRepos"`
-	AvgPerWeek   int `json:"avgPerWeek"`
-}
-
 type DashboardSnapshot struct {
-	Metrics       DashboardMetrics `json:"metrics"`
-	WeeklyCommits []WeeklyCommit   `json:"weeklyCommits"`
-	RecentCommits []RecentCommit   `json:"recentCommits"`
-	WindowDays    int              `json:"windowDays"`
+	DailyCommits  []DailyCommit  `json:"dailyCommits"`
+	RecentCommits []RecentCommit `json:"recentCommits"`
+	WindowDays    int            `json:"windowDays"`
 }
 
 type repoSnapshot struct {
-	weekCounts      []int
-	recentCommits   []RecentCommit
-	windowHasCommit bool
+	dayCounts     []int
+	recentCommits []RecentCommit
 }
 
 func Stats(email string) {
@@ -59,9 +51,10 @@ func Stats(email string) {
 		return
 	}
 
-	fmt.Printf("Total de commits: %d\n", snapshot.Metrics.TotalCommits)
-	fmt.Printf("Repositórios ativos: %d\n", snapshot.Metrics.ActiveRepos)
-	fmt.Printf("Média semanal: %d\n", snapshot.Metrics.AvgPerWeek)
+	totalCommits, avgPerWeek := deriveMetricsFromDailyCommits(snapshot.DailyCommits, snapshot.WindowDays)
+
+	fmt.Printf("Total de commits: %d\n", totalCommits)
+	fmt.Printf("Média semanal: %d\n", avgPerWeek)
 }
 
 func BuildDashboardSnapshot(email string, weeks int, recentLimit int) (DashboardSnapshot, error) {
@@ -87,24 +80,19 @@ func BuildDashboardSnapshot(email string, weeks int, recentLimit int) (Dashboard
 	windowDays := weeks * 7
 	windowStart := getBeginningOfDay(now).AddDate(0, 0, -(windowDays - 1))
 
-	totalWeekCounts := make([]int, weeks)
+	totalDayCounts := make([]int, windowDays)
 	recentCommits := make([]RecentCommit, 0, recentLimit)
-	activeRepos := make(map[string]struct{})
 	validRepos := 0
 
 	for _, path := range repos {
-		result, err := collectRepoSnapshot(path, email, windowStart, now, weeks)
+		result, err := collectRepoSnapshot(path, email, windowStart, now, windowDays)
 		if err != nil {
 			continue
 		}
 
 		validRepos++
-		for i, count := range result.weekCounts {
-			totalWeekCounts[i] += count
-		}
-
-		if result.windowHasCommit {
-			activeRepos[path] = struct{}{}
+		for i, count := range result.dayCounts {
+			totalDayCounts[i] += count
 		}
 
 		recentCommits = append(recentCommits, result.recentCommits...)
@@ -123,24 +111,14 @@ func BuildDashboardSnapshot(email string, weeks int, recentLimit int) (Dashboard
 		}
 	}
 
-	totalCommits := 0
-	for _, count := range totalWeekCounts {
-		totalCommits += count
-	}
-
 	return DashboardSnapshot{
-		Metrics: DashboardMetrics{
-			TotalCommits: totalCommits,
-			ActiveRepos:  len(activeRepos),
-			AvgPerWeek:   int(math.Round(float64(totalCommits) / float64(weeks))),
-		},
-		WeeklyCommits: toWeeklyCommits(totalWeekCounts),
+		DailyCommits:  toDailyCommits(totalDayCounts, windowStart),
 		RecentCommits: recentCommits,
 		WindowDays:    windowDays,
 	}, nil
 }
 
-func collectRepoSnapshot(path string, email string, windowStart time.Time, now time.Time, weeks int) (repoSnapshot, error) {
+func collectRepoSnapshot(path string, email string, windowStart time.Time, now time.Time, windowDays int) (repoSnapshot, error) {
 	repo, err := git.PlainOpen(path)
 	if err != nil {
 		return repoSnapshot{}, err
@@ -156,10 +134,8 @@ func collectRepoSnapshot(path string, email string, windowStart time.Time, now t
 		return repoSnapshot{}, err
 	}
 
-	windowDays := weeks * 7
-	weekCounts := make([]int, weeks)
+	dayCounts := make([]int, windowDays)
 	recentCommits := make([]RecentCommit, 0, defaultRecentLimit)
-	windowHasCommit := false
 
 	err = iterator.ForEach(func(c *object.Commit) error {
 		if c.Author.Email != email {
@@ -180,9 +156,7 @@ func collectRepoSnapshot(path string, email string, windowStart time.Time, now t
 			return nil
 		}
 
-		weekIndex := daysFromStart / 7
-		weekCounts[weekIndex]++
-		windowHasCommit = true
+		dayCounts[daysFromStart]++
 
 		recentCommits = append(recentCommits, RecentCommit{
 			Repo:    filepath.Base(path),
@@ -199,21 +173,35 @@ func collectRepoSnapshot(path string, email string, windowStart time.Time, now t
 	}
 
 	return repoSnapshot{
-		weekCounts:      weekCounts,
-		recentCommits:   recentCommits,
-		windowHasCommit: windowHasCommit,
+		dayCounts:     dayCounts,
+		recentCommits: recentCommits,
 	}, nil
 }
 
-func toWeeklyCommits(weekCounts []int) []WeeklyCommit {
-	weekly := make([]WeeklyCommit, 0, len(weekCounts))
-	for i, count := range weekCounts {
-		weekly = append(weekly, WeeklyCommit{
-			Week:    fmt.Sprintf("Sem %d", i+1),
+func toDailyCommits(dayCounts []int, windowStart time.Time) []DailyCommit {
+	daily := make([]DailyCommit, 0, len(dayCounts))
+	for i, count := range dayCounts {
+		dayDate := windowStart.AddDate(0, 0, i)
+		daily = append(daily, DailyCommit{
+			Date:    dayDate.Format("2006-01-02"),
 			Commits: count,
 		})
 	}
-	return weekly
+	return daily
+}
+
+func deriveMetricsFromDailyCommits(dailyCommits []DailyCommit, windowDays int) (int, int) {
+	totalCommits := 0
+	for _, item := range dailyCommits {
+		totalCommits += item.Commits
+	}
+
+	avgPerWeek := 0
+	if windowDays > 0 {
+		avgPerWeek = int(math.Round(float64(totalCommits*7) / float64(windowDays)))
+	}
+
+	return totalCommits, avgPerWeek
 }
 
 func getBeginningOfDay(t time.Time) time.Time {
