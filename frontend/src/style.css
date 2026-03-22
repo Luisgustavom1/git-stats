@@ -1,26 +1,44 @@
-html {
-    background-color: rgba(27, 38, 54, 1);
-    text-align: center;
-    color: white;
-}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
-body {
-    margin: 0;
-    color: white;
-    font-family: "Nunito", -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto",
-    "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue",
-    sans-serif;
-}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-@font-face {
-    font-family: "Nunito";
-    font-style: normal;
-    font-weight: 400;
-    src: local(""),
-    url("assets/fonts/nunito-v16-latin-regular.woff2") format("woff2");
-}
+@layer base {
+    :root {
+        --background: 220 25% 8%;
+        --foreground: 210 20% 98%;
 
-#app {
-    height: 100vh;
-    text-align: center;
+        --surface: 220 25% 8%;
+        --surface-dim: 220 21% 7%;
+        --surface-container-low: 220 17% 12%;
+        --surface-container-high: 220 12% 17%;
+        --surface-container-highest: 220 10% 22%;
+        --surface-variant: 220 13% 18%;
+        --surface-bright: 220 14% 25%;
+
+        --primary: 123 57% 67%;
+        --primary-foreground: 133 44% 8%;
+        --ring: 123 57% 67%;
+
+        --secondary: 220 12% 19%;
+        --secondary-foreground: 210 20% 98%;
+        --muted: 220 13% 16%;
+        --muted-foreground: 216 10% 70%;
+    }
+
+    * {
+        @apply antialiased;
+    }
+
+    body {
+        @apply m-0 min-h-screen bg-surface text-foreground;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        background-image: radial-gradient(circle at 10% 0%, rgba(123, 219, 128, 0.1) 0%, transparent 35%),
+        radial-gradient(circle at 85% 20%, rgba(35, 134, 54, 0.09) 0%, transparent 30%);
+    }
+
+    #root {
+        @apply min-h-screen;
+    }
 }
