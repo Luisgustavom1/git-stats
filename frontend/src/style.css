@@ -34,8 +34,9 @@
     body {
         @apply m-0 min-h-screen bg-surface text-foreground;
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        background-image: radial-gradient(circle at 10% 0%, rgba(123, 219, 128, 0.1) 0%, transparent 35%),
-        radial-gradient(circle at 85% 20%, rgba(35, 134, 54, 0.09) 0%, transparent 30%);
+        background-image: radial-gradient(circle at 8% 5%, hsl(var(--primary) / 0.24) 0%, transparent 38%),
+        radial-gradient(circle at 86% 16%, hsl(var(--surface-bright) / 0.55) 0%, transparent 34%),
+        linear-gradient(160deg, hsl(var(--surface-dim)) 0%, hsl(var(--surface)) 100%);
     }
 
     #root {
@@ -44,6 +45,34 @@
 }
 
 @layer utilities {
+    .glass-app {
+        @apply rounded-2xl border border-foreground/10 bg-surface/35 backdrop-blur-2xl shadow-ambient;
+    }
+
+    .glass-panel {
+        @apply rounded-xl border border-foreground/10 bg-surface-low/55 backdrop-blur-xl shadow-ambient;
+    }
+
+    .glass-chip {
+        @apply border border-foreground/10 bg-surface-high/70 backdrop-blur-md;
+    }
+
+    .glass-row {
+        @apply border border-transparent bg-surface-low/35 backdrop-blur-md;
+    }
+
+    .glass-row:hover {
+        @apply border-foreground/10 bg-surface-high/50;
+    }
+
+    .glass-grid-line {
+        @apply border-foreground/20;
+    }
+
+    .glass-cell {
+        @apply border border-foreground/10 shadow-ambient;
+    }
+
     .hide-scrollbar {
         -ms-overflow-style: none;
         scrollbar-width: none;

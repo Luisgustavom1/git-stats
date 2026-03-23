@@ -154,9 +154,12 @@ function App() {
     const maxWeeklyCommits = Math.max(...weeklyValues, 0)
 
     return (
-        <div className="overflow-hidden bg-surface text-foreground">
-            <main className="mx-auto h-full w-full space-y-2 overflow-y-auto px-2 py-2 max-w-xl">
-                <section className="space-y-1.5">
+        <div className="relative overflow-hidden text-foreground">
+            <div className="pointer-events-none absolute -left-16 -top-20 h-48 w-48 rounded-full bg-primary/35 blur-3xl"/>
+            <div className="pointer-events-none absolute -right-16 top-24 h-44 w-44 rounded-full bg-surface-bright/70 blur-3xl"/>
+
+            <main className="glass-app relative z-10 flex flex-col items-center mx-auto h-full w-full space-y-2 overflow-y-auto p-2">
+                <section className="space-y-1.5 max-w-xl w-full">
                     <div className="flex items-end justify-between">
                         <h2 className="text-sm font-bold tracking-tight text-foreground">Commit Activity</h2>
                         <div className="text-right flex gap-1 items-center">
@@ -165,12 +168,12 @@ function App() {
                         </div>
                     </div>
 
-                    <div className="relative h-24 overflow-hidden rounded-lg bg-surface-low p-2">
+                    <div className="glass-panel relative h-24 overflow-hidden p-2">
                         <div className="absolute inset-0 flex flex-col justify-between p-2 opacity-10">
-                            <div className="border-b border-foreground"/>
-                            <div className="border-b border-foreground"/>
-                            <div className="border-b border-foreground"/>
-                            <div className="border-b border-foreground"/>
+                            <div className="glass-grid-line border-b"/>
+                            <div className="glass-grid-line border-b"/>
+                            <div className="glass-grid-line border-b"/>
+                            <div className="glass-grid-line border-b"/>
                         </div>
 
                         <svg className="absolute inset-0 h-full w-full px-2 pb-2 pt-4" preserveAspectRatio="none" viewBox="0 0 100 100">
@@ -200,7 +203,7 @@ function App() {
                 </section>
 
                 <TooltipProvider delayDuration={80}>
-                    <section className="overflow-hidden rounded-lg border border-white/5 bg-surface-low p-2">
+                    <section className="glass-panel overflow-hidden p-2 max-w-xl w-full">
                         <div className="mb-2 flex items-center justify-between gap-1">
                             <h3 className="text-[10px] font-bold text-foreground">Contribuições</h3>
                             <div className="flex items-center gap-1 text-[8px] uppercase tracking-wider text-muted-foreground">
@@ -236,7 +239,7 @@ function App() {
                                             <TooltipTrigger asChild>
                                                 <button
                                                     type="button"
-                                                    className={`h-3.5 w-3.5 rounded-[1px] ${levelClass}`}
+                                                    className={`glass-cell h-3.5 w-3.5 rounded-[1px] ${levelClass}`}
                                                     aria-label={`${commitCount} commits em ${formatContributionDate(commitDate)}`}
                                                 />
                                             </TooltipTrigger>
@@ -263,27 +266,27 @@ function App() {
                     </section>
                 </TooltipProvider>
 
-                <section className="space-y-1.5">
+                <section className="space-y-1.5 max-w-xl w-full">
                     <div className="flex items-center justify-between">
                         <h3 className="text-xs font-bold tracking-tight text-foreground">Recent Activity</h3>
                     </div>
 
                     <div className="space-y-1">
                         {state === 'loading' && (
-                            <div className="rounded-lg bg-surface-low p-2 text-[10px] text-muted-foreground">Carregando atividade…</div>
+                            <div className="glass-panel p-2 text-[10px] text-muted-foreground">Carregando atividade…</div>
                         )}
 
                         {state === 'error' && (
-                            <div className="rounded-lg bg-surface-low p-2 text-[10px] text-red-300">{error}</div>
+                            <div className="glass-panel p-2 text-[10px] text-red-300">{error}</div>
                         )}
 
                         {state === 'ready' && snapshot?.recentCommits.length === 0 && (
-                            <div className="rounded-lg bg-surface-low p-2 text-[10px] text-muted-foreground">Nenhum commit recente encontrado.</div>
+                            <div className="glass-panel p-2 text-[10px] text-muted-foreground">Nenhum commit recente encontrado.</div>
                         )}
 
                         {snapshot?.recentCommits.map((commit, index) => (
-                            <div key={`${commit.repo}-${commit.date}-${index}`} className="flex items-start gap-2 rounded-lg p-2 transition-colors hover:bg-surface-high">
-                                <div className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md bg-surface-highest text-muted-foreground">
+                            <div key={`${commit.repo}-${commit.date}-${index}`} className="glass-row flex items-start gap-2 rounded-lg p-2 transition-colors">
+                                <div className="glass-chip mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground">
                                     {index === 0 ? <GitCommitHorizontal size={12} className="text-primary"/> : <History size={12}/>} 
                                 </div>
                                 <div className="min-w-0 flex-1">
